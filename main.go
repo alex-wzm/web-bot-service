@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/rs/cors"
 )
 
 var projectID string
@@ -42,7 +43,7 @@ func detectIntentQuery(sessionID string, queryText string, languageCode string) 
 
 	response, err := detect_intent.DetectIntentText(projectID, sessionID, queryText, languageCode)
 	if err != nil {
-		fmt.Errorf(err.Error())
+		fmt.Println(err.Error())
 		return "", errors.New("dialogflow error")
 	}
 	fmt.Printf("Response: %s\n", response)
@@ -74,10 +75,9 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 // detectIntentHandler handles requests to the "/detect_intent" route
 func detectIntentHandler(w http.ResponseWriter, r *http.Request) {
-
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
-	case "POST":
+	case http.MethodPost:
 		fmt.Println("\n[POST] /detect_intent")
 		type QueryBody struct {
 			SessionID    string `json:",omitempty"`
@@ -135,8 +135,12 @@ func main() {
 
 	// handle routes
 	api.HandleFunc("/", rootHandler)
-	api.HandleFunc("/detect_intent", detectIntentHandler).Methods("POST")
+	api.HandleFunc("/detect_intent", detectIntentHandler).Methods(http.MethodPost)
+
+	// enable CORS
+	// TODO: set custom options for whitelisting known applications only
+	handler := cors.Default().Handler(api)
 
 	fmt.Println("\nweb-bot-server is ready")
-	log.Fatal(http.ListenAndServe(":8081", r))
+	log.Fatal(http.ListenAndServe(":8081", handler))
 }
