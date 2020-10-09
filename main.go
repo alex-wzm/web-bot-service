@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"web-bot-service/detect_intent"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
@@ -26,26 +28,30 @@ func getProjectID() string {
 	if err != nil {
 		fmt.Print(err)
 	}
-
+	fmt.Printf("projectID: %s\n", parsed["project_id"])
 	return parsed["project_id"].(string)
 }
 
 // detectIntent gets a response to a text query using the Dialogflow detectIntent API
-func detectIntentQuery(query string) string {
-	fmt.Printf("Query: \"%s\"\n", query)
-	sessionID, languageCode := "123456789", "en"
-	// TODO: generate new sessionID on start
-	// TODO: accept languageCode as request parameter
-	response, err := detect_intent.DetectIntentText(projectID, sessionID, query, languageCode)
+func detectIntentQuery(sessionID string, queryText string, languageCode string) (string, error) {
+	fmt.Println("detectIntentQuery(")
+	fmt.Println("    sessionID:", sessionID)
+	fmt.Println("    queryText:", queryText)
+	fmt.Println("    languageCode:", languageCode)
+	fmt.Println(")")
+
+	response, err := detect_intent.DetectIntentText(projectID, sessionID, queryText, languageCode)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Errorf(err.Error())
+		return "", errors.New("dialogflow error")
 	}
 	fmt.Printf("Response: %s\n", response)
-	return response
+	return response, nil
 }
 
 // rootHandler handles requests to the root route "/"
 func rootHandler(w http.ResponseWriter, r *http.Request) {
+	// TODO: refactor to use as middleware for handler logging and writing headers
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
 	case "GET":
@@ -68,19 +74,69 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 // detectIntentHandler handles requests to the "/detect_intent" route
 func detectIntentHandler(w http.ResponseWriter, r *http.Request) {
+
 	w.Header().Set("Content-Type", "application/json")
-	response := detectIntentQuery("are you sentient?")
-	w.Write([]byte(response))
+	switch r.Method {
+	case "POST":
+		fmt.Println("\n[POST] /detect_intent")
+		type QueryBody struct {
+			SessionID    string `json:",omitempty"`
+			QueryText    string
+			LanguageCode string
+		}
+
+		var body QueryBody
+		err := json.NewDecoder(r.Body).Decode(&body)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Request body: %+v\n", body)
+
+		if body.SessionID == "" {
+			fmt.Println("✓ Generating default sessionID...")
+			// generate single-use sessionID if none is provided
+			// (want to make the API easy to use by making sessionID optional)
+			sessionID := fmt.Sprintf("default_session_%s", uuid.New())
+			body.SessionID = sessionID
+		}
+
+		if body.LanguageCode == "" {
+			fmt.Println("X Missing language code")
+			// (...but not ~that easy)
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Missing language code. Doc: https://dialogflow.com/docs/reference/language"))
+			return
+		}
+
+		// queryText == "" is ok, dialogflow will handle it
+
+		response, err := detectIntentQuery(body.SessionID, body.QueryText, body.LanguageCode)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(response))
+	default:
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Not found."))
+	}
 }
 
 func main() {
 	fmt.Println("Starting web-bot-server...")
 	projectID = getProjectID()
 
+	// initalize router + subrouter prefix
 	r := mux.NewRouter()
 	api := r.PathPrefix("/api/v1").Subrouter()
+
+	// handle routes
 	api.HandleFunc("/", rootHandler)
 	api.HandleFunc("/detect_intent", detectIntentHandler).Methods("POST")
+
 	fmt.Println("\nweb-bot-server is ready")
 	log.Fatal(http.ListenAndServe(":8081", r))
 }
