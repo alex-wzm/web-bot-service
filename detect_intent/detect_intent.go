@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	dialogflow "cloud.google.com/go/dialogflow/apiv2"
 	dialogflowpb "google.golang.org/genproto/googleapis/cloud/dialogflow/v2"
@@ -53,7 +54,16 @@ func DetectIntentText(projectID, sessionID, text, languageCode string) (string, 
 
 	queryResult := response.GetQueryResult()
 	fulfillmentText := queryResult.GetFulfillmentText()
+	intentDisplayName := queryResult.GetIntent().GetDisplayName()
+	intentDetectionConfidence := queryResult.GetIntentDetectionConfidence()
+
+	log.Println("├ queryResult")
+	log.Println("│    .fulfillmentText =>", fulfillmentText)
+	log.Println("│    .intent.displayName =>", intentDisplayName)
+	log.Println("│    .intentDetectionConfidence =>", intentDetectionConfidence)
+
 	return fulfillmentText, nil
+
 }
 
 // [END dialogflow_detect_intent_text]

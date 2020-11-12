@@ -14,39 +14,42 @@ import (
 	"github.com/rs/cors"
 )
 
+const applicationName = "web-bot-client"
+const port = ":8081"
+
 var projectID string
 
 // getProjectID extracts the projectID from the servive account JSON file
 func getProjectID() string {
 	data, err := ioutil.ReadFile("./credentials/service_account.json")
 	if err != nil {
-		fmt.Print(err)
+		log.Panic(err)
 	}
 
 	var parsed map[string]interface{}
 
 	err = json.Unmarshal(data, &parsed)
 	if err != nil {
-		fmt.Print(err)
+		log.Panic(err)
 	}
-	fmt.Printf("projectID: %s\n", parsed["project_id"])
+	log.Printf("* projectID: %s\n", parsed["project_id"])
 	return parsed["project_id"].(string)
 }
 
 // detectIntent gets a response to a text query using the Dialogflow detectIntent API
 func detectIntentQuery(sessionID string, queryText string, languageCode string) (string, error) {
-	fmt.Println("detectIntentQuery(")
-	fmt.Println("    sessionID:", sessionID)
-	fmt.Println("    queryText:", queryText)
-	fmt.Println("    languageCode:", languageCode)
-	fmt.Println(")")
+	log.Println("├ detectIntentQuery(")
+	log.Println("│    sessionID:", sessionID)
+	log.Println("│    queryText:", queryText)
+	log.Println("│    languageCode:", languageCode)
+	log.Println("│ )")
 
 	response, err := detect_intent.DetectIntentText(projectID, sessionID, queryText, languageCode)
 	if err != nil {
 		fmt.Println(err.Error())
 		return "", errors.New("dialogflow error")
 	}
-	fmt.Printf("Response: %s\n", response)
+	log.Printf("└ Response: \"%s\"\n", response)
 	return response, nil
 }
 
@@ -78,7 +81,7 @@ func detectIntentHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
 	case http.MethodPost:
-		fmt.Println("\n[POST] /detect_intent")
+		log.Println("[POST] /detect_intent")
 		type QueryBody struct {
 			SessionID    string `json:",omitempty"`
 			QueryText    string
@@ -88,27 +91,33 @@ func detectIntentHandler(w http.ResponseWriter, r *http.Request) {
 		var body QueryBody
 		err := json.NewDecoder(r.Body).Decode(&body)
 		if err != nil {
-			log.Fatal(err)
+			w.WriteHeader(http.StatusBadRequest)
+			log.Print(err)
+			return
 		}
-		fmt.Printf("Request body: %+v\n", body)
+		log.Printf("├ Request body: %+v\n", body)
 
-		if body.SessionID == "" {
-			fmt.Println("✓ Generating default sessionID...")
-			// generate single-use sessionID if none is provided
-			// (want to make the API easy to use by making sessionID optional)
-			sessionID := fmt.Sprintf("default_session_%s", uuid.New())
-			body.SessionID = sessionID
+		// guards
+		if body.QueryText == "" {
+			// required
+			log.Println("└ X Missing query text")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Missing query text."))
+			return
 		}
-
 		if body.LanguageCode == "" {
-			fmt.Println("X Missing language code")
-			// (...but not ~that easy)
+			// required
+			log.Println("└ X Missing language code")
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Missing language code. Doc: https://dialogflow.com/docs/reference/language"))
 			return
 		}
-
-		// queryText == "" is ok, dialogflow will handle it
+		if body.SessionID == "" {
+			// optional - generate single-use sessionID if none is provided
+			log.Println("├ ✓ Generating default sessionID...")
+			sessionID := fmt.Sprintf("default_session_%s", uuid.New())
+			body.SessionID = sessionID
+		}
 
 		response, err := detectIntentQuery(body.SessionID, body.QueryText, body.LanguageCode)
 		if err != nil {
@@ -126,7 +135,7 @@ func detectIntentHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	fmt.Println("Starting web-bot-server...")
+	log.Printf("* Starting %s...", applicationName)
 	projectID = getProjectID()
 
 	// initalize router + subrouter prefix
@@ -141,6 +150,6 @@ func main() {
 	// TODO: set custom options for whitelisting known applications only
 	handler := cors.Default().Handler(api)
 
-	fmt.Println("\nweb-bot-server is ready")
-	log.Fatal(http.ListenAndServe(":8081", handler))
+	log.Printf("* %s is running at port %s", applicationName, port)
+	log.Fatal(http.ListenAndServe(port, handler))
 }
